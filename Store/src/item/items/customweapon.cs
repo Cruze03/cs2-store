@@ -1,5 +1,6 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Modules.Entities;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Utils;
 using System.Runtime.InteropServices;
@@ -80,50 +81,67 @@ public static class Item_CustomWeapon
             return;
         }
 
-        CBasePlayerWeapon weapon = entity.As<CBasePlayerWeapon>();
-
         Server.NextWorldUpdate(() =>
         {
-            if (weapon.OriginalOwnerXuidLow == 0)
+            var weapon = new CBasePlayerWeapon(entity.Handle);
+			
+            if (!weapon.IsValid) return;
+            
+            if (weapon.OriginalOwnerXuidLow <= 0) return;
+
+            SteamID? _steamid = null;
+
+            if (weapon.OriginalOwnerXuidLow > 0)
+                _steamid = new(weapon.OriginalOwnerXuidLow);
+
+            CCSPlayerController? player = null;
+
+            if (_steamid != null && _steamid.IsValid())
             {
-                return;
-            }
+                player = Utilities.GetPlayers().FirstOrDefault(p => p.IsValid && p.SteamID == _steamid.SteamId64);
 
-            CCSPlayerController? player = Utilities.GetPlayerFromSteamId(weapon.OriginalOwnerXuidLow);
-
-            if (player == null)
-            {
-                return;
-            }
-
-            Store_Equipment? playerequipment = Item.GetPlayerEquipments(player).FirstOrDefault(p => p.SteamID == player.SteamID && p.Type == "customweapon");
-
-            if (playerequipment == null)
-            {
-                return;
-            }
-
-            Dictionary<string, string>? itemdata = Item.GetItem(playerequipment.Type, playerequipment.UniqueId);
-
-            if (itemdata == null)
-            {
-                return;
-            }
-
-            if (!weapon.DesignerName.Contains(itemdata["weapon"]))
-            {
-                return;
-            }
-
-            CBasePlayerWeapon? activeweapon = player.PlayerPawn.Value?.WeaponServices?.ActiveWeapon.Value;
-
-            if (activeweapon != null && weapon == activeweapon)
-            {
-                Weapon.UpdateModel(player, activeweapon, itemdata["uniqueid"], true);
+                if (player == null)
+                    player = Utilities.GetPlayerFromSteamId(weapon.OriginalOwnerXuidLow);
             }
             else
             {
-                Weapon.UpdateModel(player, weapon, itemdata["uniqueid"], false);
+                CCSWeaponBaseGun gun = weapon.As<CCSWeaponBaseGun>();
+                player = Utilities.GetPlayerFromIndex((int)weapon.OwnerEntity.Index) ?? Utilities.GetPlayerFromIndex((int)gun.OwnerEntity.Value!.Index);
+            }
+
+            if (string.IsNullOrEmpty(player?.PlayerName)) return;
+
+            var playerequipments = Item.GetPlayerEquipments(player).Where(p => p.SteamID == player.SteamID && p.Type == "customweapon").ToList();
+
+            foreach(var playerequipment in playerequipments)
+            {
+                Dictionary<string, string>? itemdata = Item.GetItem(playerequipment.Type, playerequipment.UniqueId);
+
+                if (itemdata == null) continue;
+
+                string classname = weapon.DesignerName;
+
+                if (classname.Contains("bayonet"))
+                {
+                    classname = "weapon_knife";
+                }
+                
+                if (!classname.Contains(itemdata["weapon"]))
+                {
+                    continue;
+                }
+
+                CBasePlayerWeapon? activeweapon = player.PlayerPawn.Value?.WeaponServices?.ActiveWeapon.Value;
+
+                if (activeweapon != null && weapon == activeweapon)
+                {
+                    Weapon.UpdateModel(player, activeweapon, itemdata["uniqueid"], true);
+                }
+                else
+                {
+                    Weapon.UpdateModel(player, weapon, itemdata["uniqueid"], false);
+                }
+                break;
             }
         });
     }
